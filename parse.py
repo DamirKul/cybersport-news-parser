@@ -1,38 +1,65 @@
 import csv
-
-from bs4 import BeautifulSoup
 import requests
 
-URL_ADDRESS = 'https://www.cybersport.ru/rss/materials'
+from typing import List
+from bs4 import BeautifulSoup
+
+URL_ADDRESS: str = 'https://www.cybersport.ru/rss/materials'
+FILE_NAME: str = 'output.csv'
 
 
-def parse_cybersport() -> None:
+# Finds last publish date if it exists
+def last_date(file: str) -> str | None:
+    with open(file, 'a+', encoding='UTF-8', newline='') as f:
+        f.seek(0,0)
+        read_f = csv.reader(f, delimiter=' ')
+        try:
+            return next(read_f)[1]
+        except StopIteration:
+            return None
+
+
+# Adds new content to the beginning of the file
+def update(file: str, new_content: List[str]) -> None:
+    if not new_content:
+        return
+    with open(file, 'r+', encoding='UTF-8', newline='') as f:
+        old_content = list(csv.reader(f, delimiter=' '))
+        writer = csv.writer(f, delimiter=' ', quoting=csv.QUOTE_MINIMAL)
+        f.seek(0,0)
+        writer.writerows(new_content)
+        writer.writerows(old_content)
+        return
+
+
+def parse_cybersport() -> str:
     try:
+        # Get rss feed content:
         request = requests.get(URL_ADDRESS, timeout=(5, 5))
         request.raise_for_status()
         soup = BeautifulSoup(request.content, 'xml')
-        items = soup.find_all('item')
 
-        with open('output.csv', 'w', encoding='UTF-8', newline='') as csvfile:
-            writer = csv.writer(csvfile, delimiter=' ',
-                                quoting=csv.QUOTE_MINIMAL)
+        # Read news to update:
+        last_news = soup.find(string=last_date(FILE_NAME))
+        if last_news and last_date(FILE_NAME):
+            items = last_news.find_parent('item').find_previous_siblings('item')[::-1]
+        else:
+            items = soup.find_all('item')
 
-            for item in items:
-                title = item.title.text
-                date = item.pubDate.text
-                link = item.link.text
-                writer.writerow([title, date, link])
-        
-        print('Success!')
-    except requests.exceptions.HTTPError as errh:
-        print(errh.args[0])
-    except requests.exceptions.ConnectTimeout as errct:
-        print(errct.args[0])
-    except requests.exceptions.ReadTimeout as errrt:
-        print(errrt.args[0])
-    except requests.exceptions.RequestException: 
-        print('Request exception occured.')
+        # Get necessary tags and update:
+        content: List[str] = []
+        for item in items:
+            title = item.title.text
+            date = item.pubDate.text
+            link = item.link.text
+            content.append([title, date, link])
+        update(FILE_NAME, content)
+
+        return 'Success'
+    except requests.exceptions.RequestException as e: 
+        print('Request exception occured.', e)
+        return 'Failed to execute'
 
 
 if __name__ == '__main__':
-    parse_cybersport()
+    print(parse_cybersport())
