@@ -2,63 +2,67 @@ import csv
 import requests
 
 from typing import List
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, ResultSet
 
 URL_ADDRESS: str = 'https://www.cybersport.ru/rss/materials'
 FILE_NAME: str = 'output.csv'
 
 
-# Finds last publish date if it exists
-def last_date(file: str) -> str | None:
-    with open(file, 'a+', encoding='UTF-8', newline='') as f:
-        f.seek(0,0)
-        read_f = csv.reader(f, delimiter=' ')
-        try:
-            return next(read_f)[1]
-        except StopIteration:
-            return None
+# Find last publish date if it exists
+def check_file_status(file: str) -> str | None:
+    try:
+        with open(file, encoding='UTF-8', newline='') as f:
+            read_f = list(csv.reader(f, delimiter=' '))
+            print(f'Latest news publish date is {read_f[-1][1]}, looking for update.')
+            return read_f[-1][1]
+    except FileNotFoundError:
+        print('Output file does not exist. Creating a new file.')
+    except IndexError:
+        print('File is empty, getting all content available.')
+    return None
 
 
-# Adds new content to the beginning of the file
-def update(file: str, new_content: List[str]) -> None:
+# Find required item tags
+def get_soup_content(soup: BeautifulSoup, last_date: str | None) -> ResultSet:
+    last_news = soup.find(string=last_date) if last_date else None
+    if last_news:
+        return last_news.find_parent('item').find_previous_siblings('item')
+    return soup.find_all('item')[::-1]
+
+
+# Wrap item tags in list
+def get_list_result(items: ResultSet) -> List[str]:
+    content: List[str] = []
+    for item in items:
+        title = item.title.text if item.title else None
+        date = item.pubDate.text if item.pubDate else None
+        link = item.link.text if item.link else None
+        content.append([title, date, link])
+    return content
+
+
+# Append new content to the file
+def update_file_content(file: str, new_content: List[str]) -> str:
     if not new_content:
-        return
-    with open(file, 'r+', encoding='UTF-8', newline='') as f:
-        old_content = list(csv.reader(f, delimiter=' '))
+        return 'Currently no content to add.'
+    with open(file, 'a', encoding='UTF-8', newline='') as f:
         writer = csv.writer(f, delimiter=' ', quoting=csv.QUOTE_MINIMAL)
-        f.seek(0,0)
         writer.writerows(new_content)
-        writer.writerows(old_content)
-        return
+        return f'{len(new_content)} new lines added to the file!'
 
 
 def parse_cybersport() -> str:
     try:
-        # Get rss feed content:
         request = requests.get(URL_ADDRESS, timeout=(5, 5))
         request.raise_for_status()
         soup = BeautifulSoup(request.content, 'xml')
 
-        # Read news to update:
-        last_news = soup.find(string=last_date(FILE_NAME))
-        if last_news and last_date(FILE_NAME):
-            items = last_news.find_parent('item').find_previous_siblings('item')[::-1]
-        else:
-            items = soup.find_all('item')
-
-        # Get necessary tags and update:
-        content: List[str] = []
-        for item in items:
-            title = item.title.text
-            date = item.pubDate.text
-            link = item.link.text
-            content.append([title, date, link])
-        update(FILE_NAME, content)
-
-        return 'Success'
+        check = check_file_status(FILE_NAME)
+        items = get_soup_content(soup, check)
+        content = get_list_result(items)
+        return update_file_content(FILE_NAME, content)
     except requests.exceptions.RequestException as e: 
-        print('Request exception occured.', e)
-        return 'Failed to execute'
+        return f'Request exception occured. {e}'
 
 
 if __name__ == '__main__':
