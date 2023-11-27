@@ -13,21 +13,25 @@ def check_file_status(file: str) -> str | None:
     try:
         with open(file, encoding='UTF-8', newline='') as f:
             read_f = list(csv.reader(f, delimiter=' '))
-            print(f'Latest news publish date is {read_f[-1][1]}, looking for update.')
             return read_f[-1][1]
     except FileNotFoundError:
         print('Output file does not exist. Creating a new file.')
+        return
     except IndexError:
         print('File is empty, getting all content available.')
-    return None
+        return
 
 
 # Find required item tags
 def get_soup_content(soup: BeautifulSoup, last_date: str | None) -> ResultSet:
     last_news = soup.find(string=last_date) if last_date else None
-    if last_news:
-        return last_news.find_parent('item').find_previous_siblings('item')
-    return soup.find_all('item')[::-1]
+    try:
+        if last_news:
+            return last_news.find_parent('item').find_previous_siblings('item')
+        return soup.find_all('item')[::-1]
+    except AttributeError:
+        print("Error: can't find 'item' tag in parsed content.")
+        return []
 
 
 # Wrap item tags in list
@@ -42,16 +46,20 @@ def get_list_result(items: ResultSet) -> List[str]:
 
 
 # Append new content to the file
-def update_file_content(file: str, new_content: List[str]) -> str:
+def update_file_content(file: str, new_content: List[str]) -> None:
     if not new_content:
-        return 'Currently no content to add.'
-    with open(file, 'a', encoding='UTF-8', newline='') as f:
-        writer = csv.writer(f, delimiter=' ', quoting=csv.QUOTE_MINIMAL)
-        writer.writerows(new_content)
-        return f'{len(new_content)} new lines added to the file!'
+        return
+    try:
+        with open(file, 'a', encoding='UTF-8', newline='') as f:
+            writer = csv.writer(f, delimiter=' ', quoting=csv.QUOTE_MINIMAL)
+            writer.writerows(new_content)
+            return
+    except OSError as e:
+        print('Error while working with file:', e)
+        return
 
 
-def parse_cybersport() -> str:
+def parse_cybersport() -> None:
     try:
         request = requests.get(URL_ADDRESS, timeout=(5, 5))
         request.raise_for_status()
@@ -60,10 +68,12 @@ def parse_cybersport() -> str:
         check = check_file_status(FILE_NAME)
         items = get_soup_content(soup, check)
         content = get_list_result(items)
-        return update_file_content(FILE_NAME, content)
+        update_file_content(FILE_NAME, content)
+        return
     except requests.exceptions.RequestException as e: 
-        return f'Request exception occured. {e}'
+        print('Request exception occured.', e)
+        return
 
 
 if __name__ == '__main__':
-    print(parse_cybersport())
+    parse_cybersport()
