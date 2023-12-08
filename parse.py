@@ -1,11 +1,23 @@
 import csv
 import requests
 
+from sqlalchemy import create_engine, Engine
+from sqlalchemy.orm import declarative_base, mapped_column, Mapped, Session
 from typing import List
 from bs4 import BeautifulSoup, ResultSet
 
 URL_ADDRESS: str = 'https://www.cybersport.ru/rss/materials'
 FILE_NAME: str = 'output.csv'
+
+Base = declarative_base()
+
+
+class NewsModel(Base):
+    __tablename__ = 'news'
+    id: Mapped[int] = mapped_column(autoincrement=True, primary_key=True)
+    title: Mapped[str] = mapped_column()
+    pub_date: Mapped[str] = mapped_column()
+    link: Mapped[str] = mapped_column()
 
 
 # Find last publish date if it exists
@@ -35,13 +47,17 @@ def get_soup_content(soup: BeautifulSoup, last_date: str | None) -> ResultSet:
 
 
 # Wrap item tags in list
-def get_list_result(items: ResultSet) -> List[str]:
+def get_list_result(items: ResultSet, engine: Engine) -> List[str]:
     content: List[str] = []
-    for item in items:
-        title = item.title.text if item.title else None
-        date = item.pubDate.text if item.pubDate else None
-        link = item.link.text if item.link else None
-        content.append([title, date, link])
+    with Session(engine) as session:
+        with session.begin():
+            NewsModel.metadata.create_all(engine)
+            for item in items:
+                title = item.title.text if item.title else None
+                date = item.pubDate.text if item.pubDate else None
+                link = item.link.text if item.link else None
+                content.append([title, date, link])
+                session.add(NewsModel(title=title, pub_date=date, link=link))
     return content
 
 
@@ -64,10 +80,11 @@ def parse_cybersport() -> None:
         request = requests.get(URL_ADDRESS, timeout=(5, 5))
         request.raise_for_status()
         soup = BeautifulSoup(request.content, 'xml')
+        engine = create_engine("sqlite+pysqlite:///cybernews.db")
 
         check = check_file_status(FILE_NAME)
         items = get_soup_content(soup, check)
-        content = get_list_result(items)
+        content = get_list_result(items, engine)
         update_file_content(FILE_NAME, content)
         return
     except requests.exceptions.RequestException as e: 
